@@ -1095,6 +1095,18 @@ sticky_escape_start_y = 0.0
 # instead of replanning forever.
 repeated_obstacle_history = []
 
+# Repeated blocked-near-waypoint history. Used only to skip a non-final
+# target-navigation waypoint after the robot proves it is stuck in the same
+# local pocket. This never edits mapping and never skips the final target
+# approach/reach waypoint.
+waypoint_block_history = []
+
+# Wide-corner local execution state. This is not a planner mode and never
+# edits map cells; it only changes how a sharp target-path corner is driven.
+wide_corner_active = False
+wide_corner_waypoint_index = -1
+wide_corner_last_log_time = -1000.0
+
 previous_encoders = None
 initial_heading = None
 
@@ -3935,10 +3947,12 @@ def repeated_obstacle_should_force_recovery(reason, current_time, front_ir):
     ):
         return False
 
-    # This is mostly an ESCAPE/local-corridor issue. Keep target and ordinary
-    # exploration behavior unchanged unless they are already in the same tight
-    # local pocket.
-    if active_plan_type not in ("ESCAPE", "FRONTIER"):
+    # This started as an ESCAPE/frontier guard, but the same limbo band can
+    # happen on a target-return path after blue. Target plans get an extra
+    # near-waypoint forgiveness check before this function is called; if they
+    # are not close enough to skip a waypoint, repeated same-pose events should
+    # still force physical recovery instead of another identical target replan.
+    if active_plan_type not in ("ESCAPE", "FRONTIER", "TARGET"):
         return False
 
     repeated_obstacle_history.append(
@@ -3975,6 +3989,431 @@ def repeated_obstacle_should_force_recovery(reason, current_time, front_ir):
     return False
 
 
+def sharp_corner_geometry(index):
+    """Return geometry for a sharp planned corner at waypoint index."""
+
+    if index < 0 or index >= len(planned_waypoints) - 1:
+        return None
+
+    corner_x, corner_y = planned_waypoints[index]
+    next_x, next_y = planned_waypoints[index + 1]
+
+    if index > 0:
+        previous_x, previous_y = planned_waypoints[index - 1]
+    else:
+        previous_x, previous_y = robot_x, robot_y
+
+    incoming_x = corner_x - previous_x
+    incoming_y = corner_y - previous_y
+    incoming_length = math.hypot(incoming_x, incoming_y)
+
+    # If the previous waypoint is too close to the corner, use the current
+    # robot pose as the incoming direction. This is common immediately after a
+    # replan where the first waypoint lies just ahead of the robot.
+    if incoming_length < 0.08:
+        incoming_x = corner_x - robot_x
+        incoming_y = corner_y - robot_y
+        incoming_length = math.hypot(incoming_x, incoming_y)
+
+    outgoing_x = next_x - corner_x
+    outgoing_y = next_y - corner_y
+    outgoing_length = math.hypot(outgoing_x, outgoing_y)
+
+    if incoming_length < 0.05 or outgoing_length < 0.08:
+        return None
+
+    incoming_heading = math.atan2(incoming_y, incoming_x)
+    outgoing_heading = math.atan2(outgoing_y, outgoing_x)
+    turn_angle = normalize_angle(outgoing_heading - incoming_heading)
+    turn_abs = abs(turn_angle)
+
+    if turn_abs < WIDE_CORNER_MIN_TURN_ANGLE:
+        return None
+
+    turn_sign = 1.0 if turn_angle > 0.0 else -1.0
+    outgoing_unit_x = outgoing_x / outgoing_length
+    outgoing_unit_y = outgoing_y / outgoing_length
+
+    # Left normal of the outgoing segment. The outward direction is opposite
+    # the inside of the turn: for a left turn, offset right; for a right turn,
+    # offset left.
+    left_normal_x = -outgoing_unit_y
+    left_normal_y = outgoing_unit_x
+    outward_x = -turn_sign * left_normal_x
+    outward_y = -turn_sign * left_normal_y
+
+    projection_after_corner = (
+        (robot_x - corner_x) * outgoing_unit_x
+        + (robot_y - corner_y) * outgoing_unit_y
+    )
+
+    return {
+        "corner_x": corner_x,
+        "corner_y": corner_y,
+        "next_x": next_x,
+        "next_y": next_y,
+        "incoming_heading": incoming_heading,
+        "outgoing_heading": outgoing_heading,
+        "turn_angle": turn_angle,
+        "turn_abs": turn_abs,
+        "turn_sign": turn_sign,
+        "outgoing_unit_x": outgoing_unit_x,
+        "outgoing_unit_y": outgoing_unit_y,
+        "outward_x": outward_x,
+        "outward_y": outward_y,
+        "projection_after_corner": projection_after_corner,
+    }
+
+
+def current_waypoint_is_sharp_corner():
+    """True when the current waypoint is an important sharp-corner guide."""
+
+    return sharp_corner_geometry(waypoint_index) is not None
+
+
+def wide_corner_candidate(front_ir, ir_values):
+    """Return wide-corner geometry when the local arc controller should run."""
+
+    if not WIDE_CORNER_ENABLED:
+        return None
+
+    if active_plan_type != "TARGET":
+        return None
+
+    if mission_state not in WIDE_CORNER_MISSION_STATES:
+        return None
+
+    if waypoint_index >= len(planned_waypoints) - 1:
+        return None
+
+    if last_green_ratio >= WIDE_CORNER_MAX_GREEN_RATIO:
+        return None
+
+    if front_ir <= WIDE_CORNER_HARD_IR:
+        return None
+
+    if (
+        math.isfinite(last_front_lidar)
+        and last_front_lidar <= WIDE_CORNER_HARD_LIDAR
+    ):
+        return None
+
+    geometry = sharp_corner_geometry(waypoint_index)
+    if geometry is None:
+        return None
+
+    corner_x = geometry["corner_x"]
+    corner_y = geometry["corner_y"]
+    distance_to_corner = math.hypot(corner_x - robot_x, corner_y - robot_y)
+
+    if distance_to_corner > WIDE_CORNER_ENTRY_DISTANCE:
+        return None
+
+    # Keep this local to tight/narrow situations. On open turns the standard
+    # path follower is smoother and faster.
+    narrow_evidence = (
+        min(ir_values) < NARROW_CORRIDOR_SIDE_DISTANCE
+        or last_front_lidar < NARROW_CORRIDOR_FRONT_LIDAR_DISTANCE
+        or front_ir < FRONT_IR_STOP_DISTANCE + 0.08
+        or distance_to_corner <= WIDE_CORNER_PASS_DISTANCE + 0.03
+    )
+    if not narrow_evidence:
+        return None
+
+    geometry["distance_to_corner"] = distance_to_corner
+    return geometry
+
+
+def handle_wide_corner_step(current_time, front_ir, ir_values):
+    """Drive a sharp target-path corner as a slow outward arc.
+
+    Returns True when it has issued a wheel command or consumed the current
+    step. It never changes the occupancy grid and never creates a new plan.
+    """
+
+    global waypoint_index
+    global wide_corner_active, wide_corner_waypoint_index
+    global wide_corner_last_log_time
+    global waypoint_block_history, repeated_obstacle_history
+    global emergency_ir_confirmation_count
+    global progress_anchor_x, progress_anchor_y
+    global progress_anchor_heading, progress_anchor_time
+
+    geometry = wide_corner_candidate(front_ir, ir_values)
+
+    if geometry is None:
+        if wide_corner_active:
+            wide_corner_active = False
+            wide_corner_waypoint_index = -1
+        return False
+
+    corner_x = geometry["corner_x"]
+    corner_y = geometry["corner_y"]
+    projection = geometry["projection_after_corner"]
+    distance_to_corner = geometry["distance_to_corner"]
+
+    already_in_this_arc = (
+        wide_corner_active
+        and wide_corner_waypoint_index == waypoint_index
+    )
+
+    # Once the robot has actually rounded the corner, advance to the next
+    # waypoint. This is not loop-forgiveness; it happens only after wide-corner
+    # mode has had at least one control step to start the outward arc.
+    if (
+        already_in_this_arc
+        and (
+            projection >= WIDE_CORNER_PASS_PROJECTION
+            or distance_to_corner <= WIDE_CORNER_PASS_DISTANCE
+        )
+    ):
+        old_index = waypoint_index
+        waypoint_index += 1
+        wide_corner_active = False
+        wide_corner_waypoint_index = -1
+        waypoint_block_history = []
+        repeated_obstacle_history = []
+        emergency_ir_confirmation_count = 0
+        progress_anchor_x = robot_x
+        progress_anchor_y = robot_y
+        progress_anchor_heading = robot_theta
+        progress_anchor_time = current_time
+
+        print("\n----------------------------------------")
+        print("WIDE CORNER WAYPOINT PASSED")
+        print(
+            f"Advanced waypoint {old_index + 1}/"
+            f"{len(planned_waypoints)} at sharp corner | "
+            f"distance={distance_to_corner:.3f} m | "
+            f"projection={projection:.3f} m"
+        )
+        print("Continuing the same target path; no map cells changed.")
+        print("----------------------------------------\n")
+
+        if waypoint_index >= len(planned_waypoints):
+            handle_completed_plan(current_time)
+
+        return True
+
+    virtual_x = (
+        corner_x
+        + geometry["outgoing_unit_x"] * WIDE_CORNER_LOOKAHEAD_DISTANCE
+        + geometry["outward_x"] * WIDE_CORNER_OUTWARD_OFFSET
+    )
+    virtual_y = (
+        corner_y
+        + geometry["outgoing_unit_y"] * WIDE_CORNER_LOOKAHEAD_DISTANCE
+        + geometry["outward_y"] * WIDE_CORNER_OUTWARD_OFFSET
+    )
+
+    target_heading = math.atan2(virtual_y - robot_y, virtual_x - robot_x)
+    heading_error = normalize_angle(target_heading - robot_theta)
+
+    base_speed = WIDE_CORNER_SPEED
+    correction_limit = min(
+        WIDE_CORNER_MAX_CORRECTION,
+        base_speed * 0.85,
+    )
+    correction = clamp(
+        WIDE_CORNER_KP * heading_error,
+        -correction_limit,
+        correction_limit,
+    )
+
+    # If one front corner is already close, bias the arc away from it. Positive
+    # correction turns left; negative correction turns right.
+    fl = ir_values[0]
+    fr = ir_values[1]
+    if fl < WIDE_CORNER_SIDE_IR and fr > fl + 0.04:
+        correction -= WIDE_CORNER_SENSOR_BIAS
+    elif fr < WIDE_CORNER_SIDE_IR and fl > fr + 0.04:
+        correction += WIDE_CORNER_SENSOR_BIAS
+
+    correction = clamp(correction, -correction_limit, correction_limit)
+
+    if (
+        not wide_corner_active
+        or wide_corner_waypoint_index != waypoint_index
+    ):
+        wide_corner_active = True
+        wide_corner_waypoint_index = waypoint_index
+        wide_corner_last_log_time = -1000.0
+
+    if current_time - wide_corner_last_log_time >= WIDE_CORNER_LOG_INTERVAL:
+        direction_name = "left" if geometry["turn_sign"] > 0.0 else "right"
+        print("\n----------------------------------------")
+        print("WIDE CORNER ARC ACTIVE")
+        print(
+            f"Waypoint {waypoint_index + 1}/{len(planned_waypoints)} | "
+            f"turn={direction_name} "
+            f"{math.degrees(geometry['turn_abs']):.1f} deg | "
+            f"distance={distance_to_corner:.3f} m | "
+            f"projection={projection:.3f} m"
+        )
+        print(
+            f"Virtual target=({virtual_x:.2f}, {virtual_y:.2f}) | "
+            f"front IR={front_ir:.3f} m | "
+            f"LiDAR={format_distance(last_front_lidar)} m"
+        )
+        print("Soft replans are delayed only during this local arc.")
+        print("----------------------------------------\n")
+        wide_corner_last_log_time = current_time
+
+    set_wheel_speeds(
+        base_speed - correction,
+        base_speed + correction,
+    )
+    return True
+
+def maybe_forgive_blocked_near_waypoint(reason, current_time, front_ir):
+    """Skip a non-final target waypoint only after a repeated local block.
+
+    This handles the situation where A* has a good corridor path but the
+    follower keeps trying to satisfy a tiny waypoint beside a wall while a
+    borderline IR reading repeatedly causes replan/unhook loops.
+    """
+
+    global waypoint_index
+    global waypoint_block_history
+    global repeated_obstacle_history
+    global emergency_ir_confirmation_count
+    global phase, phase_entry_time
+    global progress_anchor_x, progress_anchor_y
+    global progress_anchor_heading, progress_anchor_time
+
+    if not WAYPOINT_BLOCK_FORGIVENESS_ENABLED:
+        return False
+
+    if active_plan_type != "TARGET":
+        return False
+
+    if mission_state not in ("NAVIGATE_BLUE", "NAVIGATE_YELLOW"):
+        return False
+
+    # A sharp-corner waypoint is geometry, not noise. Skipping it can make the
+    # robot cut the inside wall tighter, so wide-corner mode owns this case.
+    if current_waypoint_is_sharp_corner():
+        return False
+
+    if waypoint_index >= len(planned_waypoints):
+        return False
+
+    # Never skip the final waypoint: visual/goal confirmation owns that.
+    if waypoint_index >= len(planned_waypoints) - 1:
+        return False
+
+    if not (
+        WAYPOINT_BLOCK_FORGIVE_MIN_IR
+        <= front_ir
+        <= WAYPOINT_BLOCK_FORGIVE_MAX_IR
+    ):
+        return False
+
+    if (
+        math.isfinite(last_front_lidar)
+        and last_front_lidar < WAYPOINT_BLOCK_FORGIVE_MIN_LIDAR
+    ):
+        return False
+
+    target_x, target_y = planned_waypoints[waypoint_index]
+    distance_to_waypoint = math.hypot(
+        target_x - robot_x,
+        target_y - robot_y,
+    )
+
+    if distance_to_waypoint > WAYPOINT_BLOCK_FORGIVE_DISTANCE:
+        return False
+
+    waypoint_block_history.append(
+        (
+            current_time,
+            robot_x,
+            robot_y,
+            target_x,
+            target_y,
+            waypoint_index,
+            reason,
+        )
+    )
+
+    waypoint_block_history = [
+        item
+        for item in waypoint_block_history
+        if current_time - item[0] <= WAYPOINT_BLOCK_FORGIVE_HISTORY_WINDOW
+    ]
+
+    same_local_waypoint = []
+    for (
+        event_time,
+        event_x,
+        event_y,
+        event_target_x,
+        event_target_y,
+        event_waypoint_index,
+        event_reason,
+    ) in waypoint_block_history:
+        same_pose = (
+            math.hypot(robot_x - event_x, robot_y - event_y)
+            <= WAYPOINT_BLOCK_FORGIVE_HISTORY_RADIUS
+        )
+        same_waypoint = (
+            event_waypoint_index == waypoint_index
+            or math.hypot(
+                target_x - event_target_x,
+                target_y - event_target_y,
+            ) <= WAYPOINT_BLOCK_FORGIVE_TARGET_RADIUS
+        )
+
+        if same_pose and same_waypoint:
+            same_local_waypoint.append((event_time, event_reason))
+
+    if (
+        len(same_local_waypoint)
+        < WAYPOINT_BLOCK_FORGIVE_REQUIRED_EVENTS
+    ):
+        return False
+
+    old_index = waypoint_index
+    waypoint_index += 1
+
+    stop_robot()
+    phase = "FOLLOW_PATH"
+    phase_entry_time = current_time
+    emergency_ir_confirmation_count = 0
+
+    progress_anchor_x = robot_x
+    progress_anchor_y = robot_y
+    progress_anchor_heading = robot_theta
+    progress_anchor_time = current_time
+
+    # Clear local loop histories so the next waypoint starts fresh.
+    waypoint_block_history = []
+    repeated_obstacle_history = []
+
+    print("\n----------------------------------------")
+    print("NEAR-WAYPOINT BLOCK FORGIVEN")
+    print(
+        f"Repeated blocks near waypoint {old_index + 1}/"
+        f"{len(planned_waypoints)}: "
+        f"{len(same_local_waypoint)}/"
+        f"{WAYPOINT_BLOCK_FORGIVE_REQUIRED_EVENTS}"
+    )
+    print(
+        f"Skipping waypoint ({target_x:.2f}, {target_y:.2f}) | "
+        f"distance={distance_to_waypoint:.3f} m | "
+        f"front IR={front_ir:.3f} m | "
+        f"front LiDAR={format_distance(last_front_lidar)} m"
+    )
+    print(f"Reason: {reason}")
+    print("Resuming the existing target path; no map cells changed.")
+    print("----------------------------------------\n")
+
+    if waypoint_index >= len(planned_waypoints):
+        handle_completed_plan(current_time)
+
+    return True
+
+
 def request_replan(reason, current_time):
     """Stop, keep mapping, and request a fresh frontier plan."""
 
@@ -3986,6 +4425,7 @@ def request_replan(reason, current_time):
     global last_replan_reason
     global progress_anchor_x, progress_anchor_y
     global progress_anchor_heading, progress_anchor_time
+    global wide_corner_active, wide_corner_waypoint_index
 
     stop_robot()
 
@@ -3993,6 +4433,8 @@ def request_replan(reason, current_time):
     phase = "REPLAN"
     phase_entry_time = current_time
     waypoint_index = 0
+    wide_corner_active = False
+    wide_corner_waypoint_index = -1
     green_confirmation_count = 0
     emergency_ir_confirmation_count = 0
     progress_anchor_x = robot_x
@@ -4184,6 +4626,7 @@ def follow_planned_path(
     global waypoint_index
     global green_confirmation_count
     global emergency_ir_confirmation_count
+    global waypoint_block_history
 
     if waypoint_index >= len(planned_waypoints):
         handle_completed_plan(current_time)
@@ -4208,6 +4651,7 @@ def follow_planned_path(
             f"target=({target_x:.2f}, {target_y:.2f})"
         )
         waypoint_index += 1
+        waypoint_block_history = []
         stop_robot()
 
         if waypoint_index >= len(planned_waypoints):
@@ -4216,6 +4660,13 @@ def follow_planned_path(
 
     target_heading = math.atan2(delta_y, delta_x)
     heading_error = normalize_angle(target_heading - robot_theta)
+
+    # Sharp target-path corners in tight corridors should be driven as a slow
+    # outward arc, not as "reach corner exactly, then rotate". This keeps the
+    # robot away from the inside wall and delays only soft replans while the
+    # arc is executing; hard contacts still fall through to normal recovery.
+    if handle_wide_corner_step(current_time, front_ir, ir_values):
+        return
 
     # During an in-place turn, only the two corners that sweep outward
     # are relevant. Requiring consecutive detections prevents a single
@@ -4239,6 +4690,16 @@ def follow_planned_path(
                 "confirmed turn-clearance contact while following path "
                 f"({turn_sensor_name}={turn_ir:.3f} m)"
             )
+
+            if (
+                turn_sensor_name in ("fl", "fr")
+                and maybe_forgive_blocked_near_waypoint(
+                    contact_reason,
+                    current_time,
+                    min(ir_values[0], ir_values[1]),
+                )
+            ):
+                return
 
             if enter_rear_corner_unhook(
                 contact_reason,
@@ -4323,6 +4784,17 @@ def follow_planned_path(
             f"LiDAR={format_distance(last_front_lidar)} m, "
             f"depth-clearance={format_distance(last_clearance_front)} m)"
         )
+
+        # If this is the second+ borderline block beside a non-final target
+        # waypoint, skip that tiny waypoint before using more unhooks/replans.
+        # This keeps a good return path alive when the robot is already almost
+        # at the waypoint but too close to a wall to align perfectly.
+        if maybe_forgive_blocked_near_waypoint(
+            obstacle_reason,
+            current_time,
+            front_ir,
+        ):
+            return
 
         # One-corner wheel clips should be handled as local motion problems
         # before any global A* replan. This is especially important after blue
@@ -4471,6 +4943,7 @@ print(
 print("Sticky/narrow escape + soft contact thresholds for tight zigzags")
 print("One-corner slab unhook enabled: tiny reverse + angled forward arc")
 print("Rear-corner unhook enabled: forward arc when rear is against wall")
+print("Wide-corner target return enabled: slow outward arc around sharp bends")
 print("========================================\n")
 
 

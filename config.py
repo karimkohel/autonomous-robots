@@ -128,6 +128,46 @@ DEPTH_CAMERA_OFFSET_Y = 0.037
 # Path-following configuration.
 WAYPOINT_REACHED_DISTANCE = 0.07
 GOAL_REACHED_DISTANCE = 0.10
+
+# Near-waypoint forgiveness for target navigation.
+# If target navigation repeatedly gets stopped by a borderline front/side
+# reading while the robot is already basically at a non-final waypoint, skip
+# that waypoint instead of throwing away a good A* path. This is deliberately
+# loop-gated: the first local obstacle still uses normal unhook/recovery.
+WAYPOINT_BLOCK_FORGIVENESS_ENABLED = True
+WAYPOINT_BLOCK_FORGIVE_DISTANCE = 0.15
+WAYPOINT_BLOCK_FORGIVE_REQUIRED_EVENTS = 2
+WAYPOINT_BLOCK_FORGIVE_HISTORY_WINDOW = 8.0
+WAYPOINT_BLOCK_FORGIVE_HISTORY_RADIUS = 0.18
+WAYPOINT_BLOCK_FORGIVE_TARGET_RADIUS = 0.16
+WAYPOINT_BLOCK_FORGIVE_MIN_IR = 0.09
+WAYPOINT_BLOCK_FORGIVE_MAX_IR = 0.16
+WAYPOINT_BLOCK_FORGIVE_MIN_LIDAR = 0.22
+
+# Wide-corner execution for tight target-return bends.
+# This does not change A* or mapping. When a target path contains a sharp
+# local corner, the follower starts bending early toward a virtual point just
+# after the corner, with a small outward offset away from the inside wall.
+# Soft obstacle replans are delayed only while this local arc is active;
+# hard contact still uses normal unhook/recovery.
+WIDE_CORNER_ENABLED = True
+WIDE_CORNER_MISSION_STATES = ("NAVIGATE_YELLOW",)
+WIDE_CORNER_MIN_TURN_ANGLE = math.radians(50.0)
+WIDE_CORNER_ENTRY_DISTANCE = 0.48
+WIDE_CORNER_LOOKAHEAD_DISTANCE = 0.34
+WIDE_CORNER_OUTWARD_OFFSET = 0.10
+WIDE_CORNER_PASS_DISTANCE = 0.14
+WIDE_CORNER_PASS_PROJECTION = 0.035
+WIDE_CORNER_HARD_IR = 0.075
+WIDE_CORNER_HARD_LIDAR = 0.20
+WIDE_CORNER_MAX_GREEN_RATIO = 0.075
+WIDE_CORNER_SPEED = 0.60 * SPEED_MULTIPLIER
+WIDE_CORNER_KP = 1.35 * SPEED_MULTIPLIER
+WIDE_CORNER_MAX_CORRECTION = 0.42 * SPEED_MULTIPLIER
+WIDE_CORNER_SENSOR_BIAS = 0.18 * SPEED_MULTIPLIER
+WIDE_CORNER_SIDE_IR = 0.18
+WIDE_CORNER_LOG_INTERVAL = 0.80
+
 PATH_FORWARD_SPEED = 1.80 * SPEED_MULTIPLIER
 PATH_TURN_SPEED = 1.10 * SPEED_MULTIPLIER
 PATH_HEADING_KP = 2.2 * SPEED_MULTIPLIER
