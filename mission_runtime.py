@@ -1067,6 +1067,12 @@ sticky_escape_reason = ""
 sticky_escape_start_x = 0.0
 sticky_escape_start_y = 0.0
 
+# Repeated near-obstacle replans from the same pose are a dead zone in tight
+# slanted corridors: too close for normal path following, not close enough for
+# contact recovery. This history lets the controller force a small recovery
+# instead of replanning forever.
+repeated_obstacle_history = []
+
 previous_encoders = None
 initial_heading = None
 
@@ -1336,26 +1342,15 @@ def build_current_planning_layers(current_time=None, narrow_mode=False):
             | clearance_inflated_cells
         )
 
-    # Proven-traversable corridor: use the driven centreline as a safe lane,
-    # not as an obstacle eraser. Raw occupied wall cells and green remain hard,
-    # and at least one grey padding layer directly touching raw walls is kept.
-    # This prevents the return-to-yellow planner from inventing shortcuts
-    # through wall edges that the robot merely passed beside on the way to blue.
-    protected_wall_margin = occupancy_grid.inflate_cell_set(
-        occupied_cells,
-        TRAVERSED_KEEP_WALL_ADJACENCY_CELLS,
-    )
-
-    traversed_softened = 0
+    # Proven-traversable corridor: if the robot has already driven through a
+    # cell, do not let inflated-only margins or temporary recovery cells close it
+    # later. Raw occupied wall cells and green forbidden cells remain hard.
     for traversed_cell in occupancy_grid.traversed_cells:
         if (
             traversed_cell not in occupied_cells
             and traversed_cell not in forbidden_inflated_cells
-            and traversed_cell not in protected_wall_margin
         ):
-            if traversed_cell in inflated_cells:
-                inflated_cells.discard(traversed_cell)
-                traversed_softened += 1
+            inflated_cells.discard(traversed_cell)
 
     robot_cell = occupancy_grid.metric_to_grid(robot_x, robot_y)
 
@@ -2625,9 +2620,12 @@ def enter_collision_recovery(reason, current_time, ir_values):
     global emergency_ir_confirmation_count
     global progress_anchor_x, progress_anchor_y
     global progress_anchor_heading, progress_anchor_time
+    global repeated_obstacle_history
 
     if phase in ("RECOVERY_BACKUP", "RECOVERY_TURN"):
         return
+
+    repeated_obstacle_history = []
 
     stop_robot()
 
@@ -3410,6 +3408,63 @@ def handle_no_frontier_scan(current_time):
         NO_FRONTIER_SCAN_SPEED,
     )
 
+def repeated_obstacle_should_force_recovery(reason, current_time, front_ir):
+    """Return True after repeated near-obstacle replans in one local pocket."""
+
+    global repeated_obstacle_history
+
+    if not REPEATED_OBSTACLE_RECOVERY_ENABLED:
+        return False
+
+    # Only handle the limbo band. Hard contact still uses the normal
+    # immediate collision-recovery path. Wider distances should simply replan.
+    if not (
+        REPEATED_OBSTACLE_MIN_IR
+        <= front_ir
+        <= REPEATED_OBSTACLE_MAX_IR
+    ):
+        return False
+
+    # This is mostly an ESCAPE/local-corridor issue. Keep target and ordinary
+    # exploration behavior unchanged unless they are already in the same tight
+    # local pocket.
+    if active_plan_type not in ("ESCAPE", "FRONTIER"):
+        return False
+
+    repeated_obstacle_history.append(
+        (current_time, robot_x, robot_y, active_plan_type, reason)
+    )
+
+    repeated_obstacle_history = [
+        item
+        for item in repeated_obstacle_history
+        if current_time - item[0] <= REPEATED_OBSTACLE_WINDOW
+    ]
+
+    same_area = []
+    for event_time, event_x, event_y, event_plan_type, event_reason in repeated_obstacle_history:
+        if math.hypot(robot_x - event_x, robot_y - event_y) <= REPEATED_OBSTACLE_RADIUS:
+            same_area.append((event_time, event_plan_type, event_reason))
+
+    if len(same_area) >= REPEATED_OBSTACLE_COUNT:
+        print("\n----------------------------------------")
+        print("REPEATED NEAR-OBSTACLE DEAD ZONE")
+        print(
+            f"Near-obstacle replans in {REPEATED_OBSTACLE_RADIUS:.2f} m radius: "
+            f"{len(same_area)}/{REPEATED_OBSTACLE_COUNT}"
+        )
+        print(
+            "Forcing controlled recovery instead of another A* replan | "
+            f"front IR={front_ir:.3f} m"
+        )
+        print(f"Latest reason: {reason}")
+        print("----------------------------------------\n")
+        repeated_obstacle_history = []
+        return True
+
+    return False
+
+
 def request_replan(reason, current_time):
     """Stop, keep mapping, and request a fresh frontier plan."""
 
@@ -3740,6 +3795,16 @@ def follow_planned_path(
                 current_time,
                 ir_values,
             )
+        elif repeated_obstacle_should_force_recovery(
+            obstacle_reason,
+            current_time,
+            front_ir,
+        ):
+            enter_collision_recovery(
+                obstacle_reason + " | repeated near-obstacle dead zone",
+                current_time,
+                ir_values,
+            )
         else:
             request_replan(
                 obstacle_reason,
@@ -3841,7 +3906,6 @@ print(
     f"({ROBOT_PLANNING_RADIUS_CELLS} cells)"
 )
 print("Sticky/narrow escape + soft contact thresholds for tight zigzags")
-print("Traversed path is a thin safe lane; wall-adjacent grey padding is preserved")
 print("========================================\n")
 
 

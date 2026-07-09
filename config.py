@@ -32,8 +32,8 @@ HEADING_KP = 1.8 * SPEED_MULTIPLIER
 MAX_HEADING_CORRECTION = 0.55 * SPEED_MULTIPLIER
 
 # Safety thresholds.
-FRONT_IR_STOP_DISTANCE = 0.18
-FRONT_LIDAR_STOP_DISTANCE = 0.24
+FRONT_IR_STOP_DISTANCE = 0.14
+FRONT_LIDAR_STOP_DISTANCE = 0.22
 EMERGENCY_IR_DISTANCE = 0.045
 EMERGENCY_CONFIRMATIONS_REQUIRED = 4
 
@@ -143,15 +143,26 @@ FORWARD_ALLOWED_HEADING_ERROR = math.radians(28.0)
 # and only then asks A* for a new path.
 # Match the normal stopping boundary so there is no dead zone where
 # the robot stops and replans forever without entering physical recovery.
-CONTACT_RECOVERY_IR_DISTANCE = 0.14
-CONTACT_RECOVERY_LIDAR_DISTANCE = 0.22
-RECOVERY_BACKUP_DISTANCE = 0.18
+CONTACT_RECOVERY_IR_DISTANCE = 0.115
+CONTACT_RECOVERY_LIDAR_DISTANCE = 0.20
+RECOVERY_BACKUP_DISTANCE = 0.13
 RECOVERY_BACKUP_SPEED = 1.10 * SPEED_MULTIPLIER
 RECOVERY_REAR_STOP_DISTANCE = 0.055
 RECOVERY_BACKUP_TIMEOUT = 4.50
-RECOVERY_TURN_ANGLE = math.radians(38.0)
+RECOVERY_TURN_ANGLE = math.radians(25.0)
 RECOVERY_TURN_SPEED = 0.90 * SPEED_MULTIPLIER
 RECOVERY_TURN_TIMEOUT = 2.50
+
+# Dead-zone escape guard. If the robot repeatedly stops from the same pose
+# because a tight slanted corridor looks barely too close, do not replan
+# forever. After a few repeated near-obstacle replans, force a controlled
+# short physical recovery.
+REPEATED_OBSTACLE_RECOVERY_ENABLED = True
+REPEATED_OBSTACLE_WINDOW = 8.0
+REPEATED_OBSTACLE_RADIUS = 0.16
+REPEATED_OBSTACLE_COUNT = 3
+REPEATED_OBSTACLE_MIN_IR = 0.115
+REPEATED_OBSTACLE_MAX_IR = 0.18
 RECOVERY_CONTACT_MARK_RADIUS_CELLS = 0
 RECOVERY_CONTACT_MARK_MIN_DISTANCE = 0.18
 RECOVERY_CONTACT_MARK_MAX_DISTANCE = 0.34
@@ -179,15 +190,11 @@ NARROW_CORRIDOR_FRONT_LIDAR_DISTANCE = 0.55
 NARROW_CORRIDOR_SPEED_SCALE = 0.55
 NARROW_CORRIDOR_TURN_SPEED_SCALE = 0.45
 
-# Proven-traversable corridor. Keep this deliberately thin. The robot's
-# travelled centreline is useful evidence, but it must not act like an eraser
-# brush beside walls. One cell gives the centreline plus a tiny lateral lane.
-TRAVERSED_CORRIDOR_RADIUS_CELLS = 1
-
-# Never remove inflated wall padding from cells directly touching raw LiDAR
-# occupied wall cells. This preserves at least one grey safety layer beside
-# real walls while still allowing previously driven lanes to stay open.
-TRAVERSED_KEEP_WALL_ADJACENCY_CELLS = 1
+# Proven-traversable corridor. If the robot physically drives through a place,
+# the inflated safety margin and temporary recovery marks around that centre
+# path are softened later. Raw LiDAR occupied cells and green forbidden cells
+# remain hard blocked.
+TRAVERSED_CORRIDOR_RADIUS_CELLS = 3
 
 # Aggressive narrow mode is used only after repeated local failures. It keeps
 # raw walls and green blocked, but ignores normal wall inflation and temporary
@@ -222,7 +229,7 @@ SAFE_EXPLORE_DISTANCE = 0.40
 SAFE_EXPLORE_TIMEOUT = 5.50
 SAFE_EXPLORE_INITIAL_TURN = 0.85
 SAFE_EXPLORE_GREEN_TURN_RATIO = 0.055
-SAFE_EXPLORE_OBSTACLE_DISTANCE = 0.26
+SAFE_EXPLORE_OBSTACLE_DISTANCE = 0.23
 MAX_NO_FRONTIER_SAFE_EXPLORES = 12
 
 # Continuous exploration configuration.
@@ -315,14 +322,15 @@ RIGHT_MAX_ANGLE = math.radians(-45.0)
 # ============================================================
 
 # 3 cells x 5 cm = 15 cm LiDAR inflation around raw wall hits.
-# This was empirically necessary for Maze 4 after the 2-cell version became
-# too optimistic and produced false wall shortcuts near blue.
+# Exact pre-breadcrumb working baseline: normal wall inflation, with the
+# aggressive traversed-corridor softening from the last run that reached blue.
+# Raw occupied wall cells and green remain hard blocked.
 INFLATION_RADIUS_CELLS = 3
 
 # LiDAR rays deliberately skip cells occupied by the robot body, so these
 # cells can remain unknown. During planning only, treat this small area around
 # the current robot pose as free so A* can leave the start position.
-ROBOT_START_CLEARANCE_CELLS = 4
+ROBOT_START_CLEARANCE_CELLS = 3
 
 # A frontier cluster smaller than this is treated as sensor noise.
 MIN_FRONTIER_CLUSTER_SIZE = 5
