@@ -21,7 +21,7 @@ TURN_ANGLE = math.radians(90.0)
 # Use a moderate speed while calibrating low floating-wall detection.
 # The final command is still capped to the Webots motor maximum in
 # set_wheel_speeds().
-SPEED_MULTIPLIER = 5.0
+SPEED_MULTIPLIER = 4.0
 
 FORWARD_SPEED = 1.8 * SPEED_MULTIPLIER
 TURN_SPEED = 1.2 * SPEED_MULTIPLIER
@@ -242,7 +242,7 @@ NARROW_CORRIDOR_TURN_SPEED_SCALE = 0.45
 # the inflated safety margin and temporary recovery marks around that centre
 # path are softened later. Raw LiDAR occupied cells and green forbidden cells
 # remain hard blocked.
-TRAVERSED_CORRIDOR_RADIUS_CELLS = 3
+TRAVERSED_CORRIDOR_RADIUS_CELLS = 2
 
 # Aggressive narrow mode is used only after repeated local failures. It keeps
 # raw walls and green blocked, but ignores normal wall inflation and temporary
