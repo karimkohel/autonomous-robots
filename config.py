@@ -159,8 +159,11 @@ RECOVERY_TURN_TIMEOUT = 2.50
 # Instead, unhook the touched wheel with a tiny reverse, a small turn away
 # from the close side, and a slow forward arc, then resume the same path.
 CORNER_UNHOOK_ENABLED = True
-CORNER_UNHOOK_CLOSE_IR = 0.13
-CORNER_UNHOOK_OTHER_OPEN_IR = 0.28
+# Slightly wider than the hard contact threshold so one-wheel clips in
+# tight return corridors are handled locally before a global A* replan can
+# switch to a fake wall opening.
+CORNER_UNHOOK_CLOSE_IR = 0.145
+CORNER_UNHOOK_OTHER_OPEN_IR = 0.24
 CORNER_UNHOOK_MIN_FRONT_LIDAR = 0.22
 CORNER_UNHOOK_MAX_GREEN_RATIO = 0.075
 CORNER_UNHOOK_BACKUP_DISTANCE = 0.065

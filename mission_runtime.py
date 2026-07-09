@@ -4324,19 +4324,24 @@ def follow_planned_path(
             f"depth-clearance={format_distance(last_clearance_front)} m)"
         )
 
+        # One-corner wheel clips should be handled as local motion problems
+        # before any global A* replan. This is especially important after blue
+        # is reached: a replan from inside the tight third corridor can choose
+        # a fake thin-wall opening. If this is a real full obstacle, the
+        # candidate test below fails and the normal recovery/replan logic runs.
+        if enter_corner_unhook(
+            obstacle_reason + " | local one-corner snag before global replan",
+            current_time,
+            ir_values,
+        ):
+            return
+
         contact_level = (
             front_ir <= CONTACT_RECOVERY_IR_DISTANCE
             or last_front_lidar <= CONTACT_RECOVERY_LIDAR_DISTANCE
         )
 
         if contact_level:
-            if enter_corner_unhook(
-                obstacle_reason,
-                current_time,
-                ir_values,
-            ):
-                return
-
             enter_collision_recovery(
                 obstacle_reason,
                 current_time,
