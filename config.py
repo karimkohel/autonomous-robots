@@ -337,6 +337,13 @@ TARGET_MAX_DEPTH = 5.0
 TARGET_REPLAN_COOLDOWN = 2.50
 TARGET_CACHE_MAX_AGE = 180.0
 
+# Landmark locking. Yellow is often clearly visible early, before blue is
+# reached. Once its RGB-D position is confirmed, keep that global coordinate
+# fixed instead of letting later wall bumps / odometry slip drag the marker.
+# It is only unlocked by the existing repeated VERIFY_TARGET failure path.
+YELLOW_TARGET_LOCK_ENABLED = True
+YELLOW_TARGET_LOCK_CONFIRMATIONS = TARGET_CONFIRMATIONS_REQUIRED
+
 # Cached-target improvement:
 # A yellow position observed on the way to blue can be reused immediately
 # after blue is reached. Yellow is visually distinctive, so one reliable
@@ -359,6 +366,18 @@ TARGET_LINE_OF_SIGHT_MARGIN_CELLS = 6
 # Reaching/verification.
 TARGET_VERIFY_DURATION = 0.60
 TARGET_VERIFY_TIMEOUT = 2.50
+
+# Failed target verification recovery.
+# If the robot physically reaches a cached yellow estimate but repeatedly sees
+# no yellow pixels there, the cache is stale. Clear only FREE evidence around
+# the failed estimate back to unknown, keeping occupied walls/green intact,
+# then rotate once and resume frontier-based yellow search.
+TARGET_VERIFY_FAILURES_BEFORE_INVALIDATE = 3
+FAILED_TARGET_FORGET_RADIUS = 1.00
+FAILED_TARGET_FORGET_TRAVERSED = True
+FAILED_TARGET_REACQUIRE_SCAN_SPEED = NO_FRONTIER_SCAN_SPEED
+FAILED_TARGET_REACQUIRE_SCAN_TARGET = NO_FRONTIER_SCAN_TARGET
+FAILED_TARGET_REACQUIRE_SCAN_TIMEOUT = NO_FRONTIER_SCAN_TIMEOUT
 # Visual colour-ratio arrival. Depth and cached global distance are no
 # longer used to decide whether a pillar has been reached.
 #

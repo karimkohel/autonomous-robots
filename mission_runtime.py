@@ -1163,6 +1163,8 @@ target_cache = {
         "depth": float("inf"),
         "confirmations": 0,
         "last_seen": -1.0,
+        "locked": False,
+        "locked_at": -1.0,
     },
 }
 
@@ -1176,6 +1178,14 @@ last_target_detection = {
 last_target_detection_time = {
     "blue": -1.0,
     "yellow": -1.0,
+}
+
+# Consecutive failed visual verifications after reaching a cached target
+# approach point. Yellow uses this to detect a stale cached estimate and
+# fall back to local reacquisition/frontier search instead of looping forever.
+target_verify_failure_counts = {
+    "blue": 0,
+    "yellow": 0,
 }
 
 tracked_target_position = None
@@ -1476,6 +1486,158 @@ def clear_target_tracker():
     last_target_seen_time = -1.0
 
 
+def forget_free_space_near_metric(position, radius_m):
+    """Turn free-space evidence near a failed target estimate back to unknown.
+
+    This deliberately preserves occupied wall evidence, green forbidden cells,
+    low-clearance cells, and temporary recovery exclusions. The goal is to
+    create a new frontier around the failed target estimate without opening
+    fake holes through walls.
+    """
+
+    if position is None:
+        return 0, 0
+
+    centre = occupancy_grid.metric_to_grid(position[0], position[1])
+    if centre is None:
+        return 0, 0
+
+    centre_row, centre_col = centre
+    radius_cells = int(math.ceil(radius_m / MAP_RESOLUTION))
+    radius_squared = radius_cells * radius_cells
+
+    cells_reset = 0
+    traversed_removed = 0
+
+    for delta_row in range(-radius_cells, radius_cells + 1):
+        for delta_col in range(-radius_cells, radius_cells + 1):
+            if delta_row * delta_row + delta_col * delta_col > radius_squared:
+                continue
+
+            row = centre_row + delta_row
+            col = centre_col + delta_col
+
+            if not occupancy_grid.is_inside(row, col):
+                continue
+
+            cell = (row, col)
+
+            # Keep semantic and physical obstacle layers intact.
+            if (
+                cell in occupancy_grid.forbidden_cells
+                or cell in occupancy_grid.clearance_cells
+                or cell in occupancy_grid.temporary_recovery_expiry
+            ):
+                continue
+
+            # Preserve occupied wall evidence. Only free/weak-free cells are
+            # reset to zero evidence, which is the unknown state.
+            if occupancy_grid.cell_state(row, col) == "occupied":
+                continue
+
+            if occupancy_grid.evidence[row][col] < 0:
+                occupancy_grid.evidence[row][col] = 0
+                cells_reset += 1
+
+            if (
+                FAILED_TARGET_FORGET_TRAVERSED
+                and cell in occupancy_grid.traversed_cells
+            ):
+                occupancy_grid.traversed_cells.discard(cell)
+                traversed_removed += 1
+
+    return cells_reset, traversed_removed
+
+
+def invalidate_failed_yellow_target(current_time, reason):
+    """Reject a stale yellow cache after repeated failed visual verification."""
+
+    global yellow_target_position
+    global tracked_target_position, tracked_target_depth
+    global target_confirmation_count, target_reached_confirmation_count
+    global last_target_seen_time
+    global active_plan_type
+
+    yellow_track = target_cache["yellow"]
+    failed_position = yellow_track["position"] or yellow_target_position
+
+    cells_reset, traversed_removed = forget_free_space_near_metric(
+        failed_position,
+        FAILED_TARGET_FORGET_RADIUS,
+    )
+
+    yellow_track["position"] = None
+    yellow_track["depth"] = float("inf")
+    yellow_track["confirmations"] = 0
+    yellow_track["last_seen"] = -1.0
+    yellow_track["locked"] = False
+    yellow_track["locked_at"] = -1.0
+
+    yellow_target_position = None
+    tracked_target_position = None
+    tracked_target_depth = float("inf")
+    target_confirmation_count = 0
+    target_reached_confirmation_count = 0
+    last_target_seen_time = -1.0
+    target_verify_failure_counts["yellow"] = 0
+
+    last_target_detection["yellow"] = None
+    last_target_detection_time["yellow"] = -1.0
+    target_retry_not_before["yellow"] = -1.0
+    target_retry_pose["yellow"] = None
+
+    print("\n========================================")
+    print("STALE YELLOW TARGET INVALIDATED")
+    print("----------------------------------------")
+    print(f"Reason: {reason}")
+    if failed_position is None:
+        print("Failed target estimate: unavailable")
+    else:
+        print(
+            "Failed target estimate: "
+            f"x={failed_position[0]:.2f}, y={failed_position[1]:.2f}"
+        )
+    print(
+        "Free-space evidence reset to unknown: "
+        f"{cells_reset} cells within {FAILED_TARGET_FORGET_RADIUS:.2f} m"
+    )
+    print(f"Traversed corridor cells forgotten: {traversed_removed}")
+    print("Occupied walls, green forbidden cells, and recovery cells were preserved.")
+    print("Yellow cache and landmark lock cleared. Returning to SEARCH_YELLOW after a map-refresh scan.")
+    print("========================================\n")
+
+    active_plan_type = "FRONTIER"
+    set_mission_state("SEARCH_YELLOW")
+    begin_no_frontier_scan(
+        "stale yellow target invalidated; local map bubble reset",
+        current_time,
+    )
+
+
+def yellow_cache_locked():
+    """Return True when yellow has a fixed landmark estimate."""
+
+    track = target_cache["yellow"]
+    return bool(track.get("locked") and track["position"] is not None)
+
+
+def yellow_cache_valid_for_planning(current_time):
+    """Yellow lock remains valid until explicit VERIFY_TARGET failure."""
+
+    track = target_cache["yellow"]
+
+    if track["position"] is None:
+        return False
+
+    if track["confirmations"] < YELLOW_CACHE_CONFIRMATIONS_AFTER_BLUE:
+        return False
+
+    if track.get("locked"):
+        return True
+
+    return current_time - track["last_seen"] <= TARGET_CACHE_MAX_AGE
+
+
 def update_colour_cache(colour_name, detection, current_time):
     """Update one independent blue/yellow global-position cache."""
 
@@ -1497,6 +1659,21 @@ def update_colour_cache(colour_name, detection, current_time):
         detection["global_x"],
         detection["global_y"],
     )
+
+    # Yellow is a landmark after it has been confidently seen. Once locked,
+    # later noisy RGB-D projections from wall bumps / odometry slip are allowed
+    # to refresh last_seen/depth, but they never move the cached map marker.
+    if (
+        colour_name == "yellow"
+        and YELLOW_TARGET_LOCK_ENABLED
+        and track.get("locked")
+        and track["position"] is not None
+    ):
+        track["depth"] = detection["depth"]
+        track["last_seen"] = current_time
+        target_verify_failure_counts[colour_name] = 0
+        yellow_target_position = track["position"]
+        return True
 
     if track["position"] is None:
         track["position"] = measured_position
@@ -1524,6 +1701,30 @@ def update_colour_cache(colour_name, detection, current_time):
 
     track["depth"] = detection["depth"]
     track["last_seen"] = current_time
+
+    # Once yellow is confirmed, freeze the map coordinate. It will only be
+    # cleared by invalidate_failed_yellow_target() after repeated visual
+    # verification failures at the cached approach point.
+    if (
+        colour_name == "yellow"
+        and YELLOW_TARGET_LOCK_ENABLED
+        and not track.get("locked")
+        and track["confirmations"] >= YELLOW_TARGET_LOCK_CONFIRMATIONS
+        and track["position"] is not None
+    ):
+        track["locked"] = True
+        track["locked_at"] = current_time
+        print(
+            "YELLOW TARGET LOCKED | "
+            f"position=({track['position'][0]:.2f}, "
+            f"{track['position'][1]:.2f}) | "
+            f"confirm={track['confirmations']} | "
+            "will only clear after repeated VERIFY_TARGET failure"
+        )
+
+    # A fresh reliable visual/RGB-D observation means previous failed
+    # verification attempts for this colour should no longer count.
+    target_verify_failure_counts[colour_name] = 0
 
     if colour_name == "blue":
         blue_target_position = track["position"]
@@ -1655,6 +1856,7 @@ def update_all_target_caches(current_time, allow_state_transition=True):
                 f"cached={cached_text} | "
                 f"confirm={track['confirmations']}/"
                 f"{TARGET_CONFIRMATIONS_REQUIRED}"
+                + (" | LOCKED" if track.get("locked") else "")
             )
 
     if (
@@ -1669,6 +1871,7 @@ def update_all_target_caches(current_time, allow_state_transition=True):
             f"position=({yellow_track['position'][0]:.2f}, "
             f"{yellow_track['position'][1]:.2f}) | "
             f"confirm={yellow_track['confirmations']}"
+            + (" | LOCKED" if yellow_track.get("locked") else "")
         )
 
     # Highest priority: if the active target is already visually reached,
@@ -2087,13 +2290,7 @@ def plan_for_current_mission(reason, current_time):
         plan_to_current_target(reason, current_time)
     elif mission_state == "SEARCH_YELLOW":
         yellow_track = target_cache["yellow"]
-        cached_yellow_valid = (
-            yellow_track["position"] is not None
-            and yellow_track["confirmations"]
-            >= YELLOW_CACHE_CONFIRMATIONS_AFTER_BLUE
-            and current_time - yellow_track["last_seen"]
-            <= TARGET_CACHE_MAX_AGE
-        )
+        cached_yellow_valid = yellow_cache_valid_for_planning(current_time)
 
         if cached_yellow_valid:
             print(
@@ -2411,6 +2608,9 @@ def handle_target_reached(current_time):
     colour = required_target_colour()
     stop_robot()
 
+    if colour in target_verify_failure_counts:
+        target_verify_failure_counts[colour] = 0
+
     if colour == "blue":
         blue_reached_simulation_time = current_time
 
@@ -2432,13 +2632,7 @@ def handle_target_reached(current_time):
         set_mission_state("SEARCH_YELLOW")
 
         yellow_track = target_cache["yellow"]
-        yellow_cache_is_valid = (
-            yellow_track["position"] is not None
-            and yellow_track["confirmations"]
-            >= YELLOW_CACHE_CONFIRMATIONS_AFTER_BLUE
-            and current_time - yellow_track["last_seen"]
-            <= TARGET_CACHE_MAX_AGE
-        )
+        yellow_cache_is_valid = yellow_cache_valid_for_planning(current_time)
 
         if yellow_cache_is_valid:
             # Do not let an old failed yellow plan delay the direct cached plan.
@@ -2450,6 +2644,7 @@ def handle_target_reached(current_time):
                 f"position=({yellow_track['position'][0]:.2f}, "
                 f"{yellow_track['position'][1]:.2f}) | "
                 f"age={current_time - yellow_track['last_seen']:.1f} s"
+                + (" | LOCKED" if yellow_track.get("locked") else "")
             )
             request_replan(
                 "blue reached; navigate directly to cached yellow",
@@ -5529,6 +5724,33 @@ while robot.step(time_step) != -1:
             current_time - target_verify_start_time
             >= TARGET_VERIFY_TIMEOUT
         ):
+            if target_colour in target_verify_failure_counts:
+                target_verify_failure_counts[target_colour] += 1
+
+            failure_count = target_verify_failure_counts.get(
+                target_colour,
+                0,
+            )
+
+            print(
+                "VERIFY_TARGET FAILED | "
+                f"target={target_colour} | "
+                f"failures={failure_count}/"
+                f"{TARGET_VERIFY_FAILURES_BEFORE_INVALIDATE}"
+            )
+
+            if (
+                target_colour == "yellow"
+                and failure_count
+                >= TARGET_VERIFY_FAILURES_BEFORE_INVALIDATE
+            ):
+                invalidate_failed_yellow_target(
+                    current_time,
+                    "yellow visual verification failed repeatedly "
+                    "at the cached approach point",
+                )
+                continue
+
             request_replan(
                 "visual colour-ratio verification failed; approach again",
                 current_time,
