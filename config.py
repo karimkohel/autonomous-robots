@@ -153,6 +153,51 @@ RECOVERY_TURN_ANGLE = math.radians(25.0)
 RECOVERY_TURN_SPEED = 0.90 * SPEED_MULTIPLIER
 RECOVERY_TURN_TIMEOUT = 2.50
 
+# One-corner floor-slab / wheel-snag recovery.
+# A floor slab often touches only one front corner while the other corner and
+# most of the front view are open. That should not trigger global replanning.
+# Instead, unhook the touched wheel with a tiny reverse, a small turn away
+# from the close side, and a slow forward arc, then resume the same path.
+CORNER_UNHOOK_ENABLED = True
+CORNER_UNHOOK_CLOSE_IR = 0.13
+CORNER_UNHOOK_OTHER_OPEN_IR = 0.28
+CORNER_UNHOOK_MIN_FRONT_LIDAR = 0.22
+CORNER_UNHOOK_MAX_GREEN_RATIO = 0.075
+CORNER_UNHOOK_BACKUP_DISTANCE = 0.065
+CORNER_UNHOOK_BACKUP_SPEED = 0.75 * SPEED_MULTIPLIER
+CORNER_UNHOOK_TURN_ANGLE = math.radians(16.0)
+CORNER_UNHOOK_TURN_SPEED = 0.60 * SPEED_MULTIPLIER
+CORNER_UNHOOK_FORWARD_DISTANCE = 0.16
+CORNER_UNHOOK_FORWARD_SPEED = 0.70 * SPEED_MULTIPLIER
+CORNER_UNHOOK_FORWARD_ARC_BIAS = 0.30
+CORNER_UNHOOK_BACKUP_TIMEOUT = 1.20
+CORNER_UNHOOK_TURN_TIMEOUT = 1.30
+CORNER_UNHOOK_FORWARD_TIMEOUT = 1.60
+CORNER_UNHOOK_HISTORY_WINDOW = 14.0
+CORNER_UNHOOK_HISTORY_RADIUS = 0.35
+CORNER_UNHOOK_MAX_ATTEMPTS_LOCAL = 2
+
+
+# Rear-corner wall escape during tight turn-in-place.
+# If the robot has just taken a sharp bend and one rear corner is almost
+# touching a wall, reversing is impossible and normal collision recovery loops.
+# In that case, when the front is open, gently pull the chassis forward in a
+# small arc away from the trapped rear corner, then resume the same path.
+# This is local motion only; it does not mark or edit map cells.
+REAR_UNHOOK_ENABLED = True
+REAR_UNHOOK_CLOSE_IR = 0.065
+REAR_UNHOOK_OTHER_OPEN_IR = 0.20
+REAR_UNHOOK_FRONT_OPEN_IR = 0.20
+REAR_UNHOOK_MIN_FRONT_LIDAR = 0.24
+REAR_UNHOOK_MAX_GREEN_RATIO = 0.075
+REAR_UNHOOK_FORWARD_DISTANCE = 0.11
+REAR_UNHOOK_FORWARD_SPEED = 0.65 * SPEED_MULTIPLIER
+REAR_UNHOOK_FORWARD_ARC_BIAS = 0.25
+REAR_UNHOOK_FORWARD_TIMEOUT = 1.40
+REAR_UNHOOK_HISTORY_WINDOW = 14.0
+REAR_UNHOOK_HISTORY_RADIUS = 0.35
+REAR_UNHOOK_MAX_ATTEMPTS_LOCAL = 2
+
 # Dead-zone escape guard. If the robot repeatedly stops from the same pose
 # because a tight slanted corridor looks barely too close, do not replan
 # forever. After a few repeated near-obstacle replans, force a controlled

@@ -1037,6 +1037,28 @@ recovery_turn_direction = 1
 recovery_turn_flipped = False
 recovery_count = 0
 
+# One-corner slab/wheel-snag recovery state. This is deliberately separate
+# from collision recovery: it does not add obstacle cells and it resumes the
+# current plan after a tiny unhook manoeuvre.
+corner_unhook_reason = ""
+corner_unhook_start_x = 0.0
+corner_unhook_start_y = 0.0
+corner_unhook_turn_start_heading = 0.0
+corner_unhook_forward_start_x = 0.0
+corner_unhook_forward_start_y = 0.0
+corner_unhook_direction = 1
+corner_unhook_side = ""
+corner_unhook_history = []
+
+# Rear-corner escape state. Used when a turn-in-place traps a rear wheel
+# against a wall while the front is open. It never touches mapping.
+rear_unhook_reason = ""
+rear_unhook_start_x = 0.0
+rear_unhook_start_y = 0.0
+rear_unhook_direction = 1
+rear_unhook_side = ""
+rear_unhook_history = []
+
 # Progress watchdog.
 progress_anchor_x = 0.0
 progress_anchor_y = 0.0
@@ -1678,6 +1700,7 @@ def update_all_target_caches(current_time, allow_state_transition=True):
             "VERIFY_TARGET",
             "RECOVERY_BACKUP",
             "RECOVERY_TURN",
+            "REAR_UNHOOK_FORWARD",
         )
         and current_time - last_target_plan_time
         >= TARGET_REPLAN_COOLDOWN
@@ -2602,6 +2625,493 @@ def mark_contact_region_from_sensors(ir_values, current_time):
 
     return newly_added
 
+
+
+def front_corner_unhook_candidate(ir_values):
+    """
+    Return (side, direction) when the sensors look like a one-corner snag.
+
+    This is for floor slabs or small side lips: one front corner is very
+    close, the opposite front corner is open, LiDAR is not showing a full
+    frontal wall, and green is not the reason for stopping. Direction uses
+    the same sign convention as the existing recovery turn: +1 left, -1 right.
+    """
+
+    if not CORNER_UNHOOK_ENABLED:
+        return None
+
+    if phase not in ("FOLLOW_PATH", "REPLAN"):
+        return None
+
+    if active_plan_type not in ("TARGET", "FRONTIER", "ESCAPE"):
+        return None
+
+    if last_green_ratio >= CORNER_UNHOOK_MAX_GREEN_RATIO:
+        return None
+
+    if math.isfinite(last_front_lidar) and last_front_lidar < CORNER_UNHOOK_MIN_FRONT_LIDAR:
+        return None
+
+    fl = ir_values[0]
+    fr = ir_values[1]
+
+    # Left front corner hooked, right side open: turn/arc right.
+    if fl <= CORNER_UNHOOK_CLOSE_IR and fr >= CORNER_UNHOOK_OTHER_OPEN_IR:
+        return ("left-front", -1)
+
+    # Right front corner hooked, left side open: turn/arc left.
+    if fr <= CORNER_UNHOOK_CLOSE_IR and fl >= CORNER_UNHOOK_OTHER_OPEN_IR:
+        return ("right-front", 1)
+
+    return None
+
+
+def corner_unhook_attempt_allowed(current_time):
+    """Prevent the local unhook manoeuvre from looping forever."""
+
+    global corner_unhook_history
+
+    corner_unhook_history = [
+        item
+        for item in corner_unhook_history
+        if current_time - item[0] <= CORNER_UNHOOK_HISTORY_WINDOW
+    ]
+
+    same_area = [
+        item
+        for item in corner_unhook_history
+        if math.hypot(robot_x - item[1], robot_y - item[2])
+        <= CORNER_UNHOOK_HISTORY_RADIUS
+    ]
+
+    if len(same_area) >= CORNER_UNHOOK_MAX_ATTEMPTS_LOCAL:
+        print("\n----------------------------------------")
+        print("CORNER UNHOOK SUPPRESSED")
+        print(
+            f"Already tried {len(same_area)} local unhooks in "
+            f"{CORNER_UNHOOK_HISTORY_RADIUS:.2f} m radius. "
+            "Falling back to normal collision recovery/replan."
+        )
+        print("----------------------------------------\n")
+        return False
+
+    return True
+
+
+def enter_corner_unhook(reason, current_time, ir_values):
+    """
+    Start a small local slab/wheel-snag recovery.
+
+    Unlike collision recovery, this does not mark map cells and does not reset
+    the current waypoint list. If it succeeds, the robot resumes following the
+    same A* plan, which is exactly what we want when only one wheel touches a
+    floor slab and the global path is still good.
+    """
+
+    global phase, phase_entry_time
+    global corner_unhook_reason
+    global corner_unhook_start_x, corner_unhook_start_y
+    global corner_unhook_turn_start_heading
+    global corner_unhook_forward_start_x, corner_unhook_forward_start_y
+    global corner_unhook_direction, corner_unhook_side
+    global corner_unhook_history
+    global emergency_ir_confirmation_count
+    global progress_anchor_x, progress_anchor_y
+    global progress_anchor_heading, progress_anchor_time
+
+    candidate = front_corner_unhook_candidate(ir_values)
+    if candidate is None:
+        return False
+
+    if not corner_unhook_attempt_allowed(current_time):
+        return False
+
+    corner_unhook_side, corner_unhook_direction = candidate
+    corner_unhook_reason = reason
+    corner_unhook_start_x = robot_x
+    corner_unhook_start_y = robot_y
+    corner_unhook_turn_start_heading = robot_theta
+    corner_unhook_forward_start_x = robot_x
+    corner_unhook_forward_start_y = robot_y
+    corner_unhook_history.append(
+        (current_time, robot_x, robot_y, corner_unhook_side)
+    )
+
+    stop_robot()
+    phase = "CORNER_UNHOOK_BACKUP"
+    phase_entry_time = current_time
+    emergency_ir_confirmation_count = 0
+
+    progress_anchor_x = robot_x
+    progress_anchor_y = robot_y
+    progress_anchor_heading = robot_theta
+    progress_anchor_time = current_time
+
+    direction_name = "left" if corner_unhook_direction > 0 else "right"
+
+    print("\n========================================")
+    print("CORNER SLAB UNHOOK STARTED")
+    print("----------------------------------------")
+    print(f"Reason: {reason}")
+    print(
+        f"Pattern: {corner_unhook_side} snag | "
+        f"fl={ir_values[0]:.3f} m, fr={ir_values[1]:.3f} m, "
+        f"front LiDAR={format_distance(last_front_lidar)} m"
+    )
+    print(
+        f"Unhook plan: reverse {CORNER_UNHOOK_BACKUP_DISTANCE:.2f} m, "
+        f"turn {direction_name} "
+        f"{math.degrees(CORNER_UNHOOK_TURN_ANGLE):.0f} degrees, "
+        f"slow arc {CORNER_UNHOOK_FORWARD_DISTANCE:.2f} m, resume same path"
+    )
+    print("No map cells will be marked for this local slab manoeuvre.")
+    print("========================================\n")
+    return True
+
+
+def handle_corner_unhook(current_time, ir_values):
+    """Execute the small one-corner unhook state machine."""
+
+    global phase, phase_entry_time
+    global corner_unhook_turn_start_heading
+    global corner_unhook_forward_start_x, corner_unhook_forward_start_y
+    global progress_anchor_x, progress_anchor_y
+    global progress_anchor_heading, progress_anchor_time
+
+    front_ir = min(ir_values[0], ir_values[1])
+
+    if phase == "CORNER_UNHOOK_BACKUP":
+        rear_ir = min(ir_values[2], ir_values[3])
+        backed_distance = math.hypot(
+            robot_x - corner_unhook_start_x,
+            robot_y - corner_unhook_start_y,
+        )
+        elapsed = current_time - phase_entry_time
+
+        backup_finished = (
+            backed_distance >= CORNER_UNHOOK_BACKUP_DISTANCE
+            or elapsed >= CORNER_UNHOOK_BACKUP_TIMEOUT
+            or rear_ir <= RECOVERY_REAR_STOP_DISTANCE
+        )
+
+        if backup_finished:
+            stop_robot()
+            phase = "CORNER_UNHOOK_TURN"
+            phase_entry_time = current_time
+            corner_unhook_turn_start_heading = robot_theta
+
+            reason_parts = []
+            if backed_distance >= CORNER_UNHOOK_BACKUP_DISTANCE:
+                reason_parts.append("backup distance reached")
+            if elapsed >= CORNER_UNHOOK_BACKUP_TIMEOUT:
+                reason_parts.append("backup timeout")
+            if rear_ir <= RECOVERY_REAR_STOP_DISTANCE:
+                reason_parts.append(f"rear obstacle {rear_ir:.3f} m")
+
+            print(
+                "Corner unhook backup finished | "
+                f"distance={backed_distance:.3f} m | "
+                + ", ".join(reason_parts)
+            )
+            return
+
+        set_wheel_speeds(
+            -CORNER_UNHOOK_BACKUP_SPEED,
+            -CORNER_UNHOOK_BACKUP_SPEED,
+        )
+        return
+
+    if phase == "CORNER_UNHOOK_TURN":
+        elapsed = current_time - phase_entry_time
+        turned = abs(
+            normalize_angle(robot_theta - corner_unhook_turn_start_heading)
+        )
+
+        if (
+            turned >= CORNER_UNHOOK_TURN_ANGLE
+            or elapsed >= CORNER_UNHOOK_TURN_TIMEOUT
+        ):
+            stop_robot()
+            phase = "CORNER_UNHOOK_FORWARD"
+            phase_entry_time = current_time
+            corner_unhook_forward_start_x = robot_x
+            corner_unhook_forward_start_y = robot_y
+
+            print(
+                "Corner unhook turn finished | "
+                f"turned={math.degrees(turned):.1f} degrees"
+            )
+            return
+
+        turn_sign = 1.0 if corner_unhook_direction > 0 else -1.0
+        set_wheel_speeds(
+            -turn_sign * CORNER_UNHOOK_TURN_SPEED,
+            turn_sign * CORNER_UNHOOK_TURN_SPEED,
+        )
+        return
+
+    if phase == "CORNER_UNHOOK_FORWARD":
+        travelled = math.hypot(
+            robot_x - corner_unhook_forward_start_x,
+            robot_y - corner_unhook_forward_start_y,
+        )
+        elapsed = current_time - phase_entry_time
+
+        # If the tiny unhook immediately hits true hard contact, stop trying
+        # to be clever and let the normal recovery/replan machinery handle it.
+        if front_ir <= EMERGENCY_IR_DISTANCE:
+            print(
+                "Corner unhook met hard contact during forward arc | "
+                f"front IR={front_ir:.3f} m | falling back to collision recovery"
+            )
+            enter_collision_recovery(
+                corner_unhook_reason
+                + " | corner unhook forward arc hit hard contact",
+                current_time,
+                ir_values,
+            )
+            return
+
+        forward_finished = (
+            travelled >= CORNER_UNHOOK_FORWARD_DISTANCE
+            or elapsed >= CORNER_UNHOOK_FORWARD_TIMEOUT
+        )
+
+        if forward_finished:
+            stop_robot()
+            phase = "FOLLOW_PATH"
+            phase_entry_time = current_time
+
+            progress_anchor_x = robot_x
+            progress_anchor_y = robot_y
+            progress_anchor_heading = robot_theta
+            progress_anchor_time = current_time
+
+            print(
+                "Corner slab unhook completed | "
+                f"arc distance={travelled:.3f} m | "
+                "resuming same path"
+            )
+            return
+
+        base = CORNER_UNHOOK_FORWARD_SPEED
+        bias = CORNER_UNHOOK_FORWARD_ARC_BIAS
+        set_wheel_speeds(
+            base * (1.0 - corner_unhook_direction * bias),
+            base * (1.0 + corner_unhook_direction * bias),
+        )
+        return
+
+
+
+def rear_corner_unhook_candidate(ir_values, turn_sensor_name=None):
+    """
+    Return (side, direction) for rear-corner wall trapping.
+
+    This is the opposite of normal collision recovery. When a rear corner is
+    already against a wall, backing up is impossible. If the front is clear,
+    the safest local action is a small forward arc that pulls the rear corner
+    away from the wall, then resumes the same A* plan. Direction uses the
+    existing sign convention: +1 left arc, -1 right arc.
+    """
+
+    if not REAR_UNHOOK_ENABLED:
+        return None
+
+    if phase not in ("FOLLOW_PATH", "REPLAN"):
+        return None
+
+    if active_plan_type not in ("TARGET", "FRONTIER", "ESCAPE"):
+        return None
+
+    if last_green_ratio >= REAR_UNHOOK_MAX_GREEN_RATIO:
+        return None
+
+    fl, fr, rl, rr = ir_values
+    front_ir = min(fl, fr)
+
+    # This manoeuvre is only for rear trapping. If the front is not open,
+    # normal collision recovery is still the safer behaviour.
+    if front_ir < REAR_UNHOOK_FRONT_OPEN_IR:
+        return None
+
+    if math.isfinite(last_front_lidar) and last_front_lidar < REAR_UNHOOK_MIN_FRONT_LIDAR:
+        return None
+
+    # If the turn-clearance detector tells us which rear corner is sweeping
+    # into the wall, trust it. A right in-place turn sweeps rear-left; a left
+    # in-place turn sweeps rear-right. The escape arc goes the opposite way:
+    # rear-left contact -> forward-left arc pulls that rear corner inward;
+    # rear-right contact -> forward-right arc pulls that rear corner inward.
+    if turn_sensor_name == "rl":
+        if rl <= REAR_UNHOOK_CLOSE_IR and rr >= REAR_UNHOOK_OTHER_OPEN_IR:
+            return ("rear-left", 1)
+        return None
+
+    if turn_sensor_name == "rr":
+        if rr <= REAR_UNHOOK_CLOSE_IR and rl >= REAR_UNHOOK_OTHER_OPEN_IR:
+            return ("rear-right", -1)
+        return None
+
+    # Fallback when called outside a turn-sweep context.
+    if rl <= REAR_UNHOOK_CLOSE_IR and rr >= REAR_UNHOOK_OTHER_OPEN_IR:
+        return ("rear-left", 1)
+
+    if rr <= REAR_UNHOOK_CLOSE_IR and rl >= REAR_UNHOOK_OTHER_OPEN_IR:
+        return ("rear-right", -1)
+
+    return None
+
+
+def rear_unhook_attempt_allowed(current_time):
+    """Prevent rear-corner escape from looping in the same local pocket."""
+
+    global rear_unhook_history
+
+    rear_unhook_history = [
+        item
+        for item in rear_unhook_history
+        if current_time - item[0] <= REAR_UNHOOK_HISTORY_WINDOW
+    ]
+
+    same_area = [
+        item
+        for item in rear_unhook_history
+        if math.hypot(robot_x - item[1], robot_y - item[2])
+        <= REAR_UNHOOK_HISTORY_RADIUS
+    ]
+
+    if len(same_area) >= REAR_UNHOOK_MAX_ATTEMPTS_LOCAL:
+        print("\n----------------------------------------")
+        print("REAR-CORNER UNHOOK SUPPRESSED")
+        print(
+            f"Already tried {len(same_area)} rear-corner escapes in "
+            f"{REAR_UNHOOK_HISTORY_RADIUS:.2f} m radius. "
+            "Falling back to normal recovery/replan."
+        )
+        print("----------------------------------------\n")
+        return False
+
+    return True
+
+
+def enter_rear_corner_unhook(reason, current_time, ir_values, turn_sensor_name=None):
+    """
+    Start a local forward escape when a rear corner is trapped.
+
+    This intentionally does not mark temporary contact cells and does not
+    change the current map. It only moves the chassis out of a rear-corner
+    turn-in-place trap, then resumes the same waypoint plan.
+    """
+
+    global phase, phase_entry_time
+    global rear_unhook_reason
+    global rear_unhook_start_x, rear_unhook_start_y
+    global rear_unhook_direction, rear_unhook_side
+    global rear_unhook_history
+    global emergency_ir_confirmation_count
+    global progress_anchor_x, progress_anchor_y
+    global progress_anchor_heading, progress_anchor_time
+
+    candidate = rear_corner_unhook_candidate(ir_values, turn_sensor_name)
+    if candidate is None:
+        return False
+
+    if not rear_unhook_attempt_allowed(current_time):
+        return False
+
+    rear_unhook_side, rear_unhook_direction = candidate
+    rear_unhook_reason = reason
+    rear_unhook_start_x = robot_x
+    rear_unhook_start_y = robot_y
+    rear_unhook_history.append(
+        (current_time, robot_x, robot_y, rear_unhook_side)
+    )
+
+    stop_robot()
+    phase = "REAR_UNHOOK_FORWARD"
+    phase_entry_time = current_time
+    emergency_ir_confirmation_count = 0
+
+    progress_anchor_x = robot_x
+    progress_anchor_y = robot_y
+    progress_anchor_heading = robot_theta
+    progress_anchor_time = current_time
+
+    direction_name = "left" if rear_unhook_direction > 0 else "right"
+
+    print("\n========================================")
+    print("REAR-CORNER UNHOOK STARTED")
+    print("----------------------------------------")
+    print(f"Reason: {reason}")
+    print(
+        f"Pattern: {rear_unhook_side} trapped | "
+        f"fl={ir_values[0]:.3f} m, fr={ir_values[1]:.3f} m, "
+        f"rl={ir_values[2]:.3f} m, rr={ir_values[3]:.3f} m, "
+        f"front LiDAR={format_distance(last_front_lidar)} m"
+    )
+    print(
+        f"Escape plan: no reverse; slow forward-{direction_name} arc "
+        f"{REAR_UNHOOK_FORWARD_DISTANCE:.2f} m, then resume same path"
+    )
+    print("No map cells will be marked for this rear-corner manoeuvre.")
+    print("========================================\n")
+    return True
+
+
+def handle_rear_corner_unhook(current_time, ir_values):
+    """Execute the rear-corner forward-arc escape."""
+
+    global phase, phase_entry_time
+    global progress_anchor_x, progress_anchor_y
+    global progress_anchor_heading, progress_anchor_time
+
+    front_ir = min(ir_values[0], ir_values[1])
+    travelled = math.hypot(
+        robot_x - rear_unhook_start_x,
+        robot_y - rear_unhook_start_y,
+    )
+    elapsed = current_time - phase_entry_time
+
+    if front_ir <= EMERGENCY_IR_DISTANCE:
+        print(
+            "Rear-corner unhook met hard front contact | "
+            f"front IR={front_ir:.3f} m | falling back to collision recovery"
+        )
+        enter_collision_recovery(
+            rear_unhook_reason
+            + " | rear-corner forward arc hit hard front contact",
+            current_time,
+            ir_values,
+        )
+        return
+
+    if (
+        travelled >= REAR_UNHOOK_FORWARD_DISTANCE
+        or elapsed >= REAR_UNHOOK_FORWARD_TIMEOUT
+    ):
+        stop_robot()
+        phase = "FOLLOW_PATH"
+        phase_entry_time = current_time
+
+        progress_anchor_x = robot_x
+        progress_anchor_y = robot_y
+        progress_anchor_heading = robot_theta
+        progress_anchor_time = current_time
+
+        print(
+            "Rear-corner unhook completed | "
+            f"arc distance={travelled:.3f} m | resuming same path"
+        )
+        return
+
+    base = REAR_UNHOOK_FORWARD_SPEED
+    bias = REAR_UNHOOK_FORWARD_ARC_BIAS
+    set_wheel_speeds(
+        base * (1.0 - rear_unhook_direction * bias),
+        base * (1.0 + rear_unhook_direction * bias),
+    )
+    return
 
 def enter_collision_recovery(reason, current_time, ir_values):
     """
@@ -3725,9 +4235,28 @@ def follow_planned_path(
             emergency_ir_confirmation_count
             >= EMERGENCY_CONFIRMATIONS_REQUIRED
         ):
-            enter_collision_recovery(
+            contact_reason = (
                 "confirmed turn-clearance contact while following path "
-                f"({turn_sensor_name}={turn_ir:.3f} m)",
+                f"({turn_sensor_name}={turn_ir:.3f} m)"
+            )
+
+            if enter_rear_corner_unhook(
+                contact_reason,
+                current_time,
+                ir_values,
+                turn_sensor_name,
+            ):
+                return
+
+            if enter_corner_unhook(
+                contact_reason,
+                current_time,
+                ir_values,
+            ):
+                return
+
+            enter_collision_recovery(
+                contact_reason,
                 current_time,
                 ir_values,
             )
@@ -3759,9 +4288,20 @@ def follow_planned_path(
         emergency_ir_confirmation_count
         >= EMERGENCY_CONFIRMATIONS_REQUIRED
     ):
-        enter_collision_recovery(
+        contact_reason = (
             f"confirmed front contact while following path "
-            f"({front_ir:.3f} m)",
+            f"({front_ir:.3f} m)"
+        )
+
+        if enter_corner_unhook(
+            contact_reason,
+            current_time,
+            ir_values,
+        ):
+            return
+
+        enter_collision_recovery(
+            contact_reason,
             current_time,
             ir_values,
         )
@@ -3790,6 +4330,13 @@ def follow_planned_path(
         )
 
         if contact_level:
+            if enter_corner_unhook(
+                obstacle_reason,
+                current_time,
+                ir_values,
+            ):
+                return
+
             enter_collision_recovery(
                 obstacle_reason,
                 current_time,
@@ -3800,8 +4347,19 @@ def follow_planned_path(
             current_time,
             front_ir,
         ):
+            repeated_reason = (
+                obstacle_reason + " | repeated near-obstacle dead zone"
+            )
+
+            if enter_corner_unhook(
+                repeated_reason,
+                current_time,
+                ir_values,
+            ):
+                return
+
             enter_collision_recovery(
-                obstacle_reason + " | repeated near-obstacle dead zone",
+                repeated_reason,
                 current_time,
                 ir_values,
             )
@@ -3906,6 +4464,8 @@ print(
     f"({ROBOT_PLANNING_RADIUS_CELLS} cells)"
 )
 print("Sticky/narrow escape + soft contact thresholds for tight zigzags")
+print("One-corner slab unhook enabled: tiny reverse + angled forward arc")
+print("Rear-corner unhook enabled: forward arc when rear is against wall")
 print("========================================\n")
 
 
@@ -4108,6 +4668,24 @@ while robot.step(time_step) != -1:
             front_ir,
             ir_values,
             green_check_updated,
+        )
+        continue
+
+    if phase == "REAR_UNHOOK_FORWARD":
+        handle_rear_corner_unhook(
+            current_time,
+            ir_values,
+        )
+        continue
+
+    if phase in (
+        "CORNER_UNHOOK_BACKUP",
+        "CORNER_UNHOOK_TURN",
+        "CORNER_UNHOOK_FORWARD",
+    ):
+        handle_corner_unhook(
+            current_time,
+            ir_values,
         )
         continue
 
