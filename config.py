@@ -370,7 +370,7 @@ RIGHT_MAX_ANGLE = math.radians(-45.0)
 # Exact pre-breadcrumb working baseline: normal wall inflation, with the
 # aggressive traversed-corridor softening from the last run that reached blue.
 # Raw occupied wall cells and green remain hard blocked.
-INFLATION_RADIUS_CELLS = 3
+INFLATION_RADIUS_CELLS = 2
 
 # LiDAR rays deliberately skip cells occupied by the robot body, so these
 # cells can remain unknown. During planning only, treat this small area around
