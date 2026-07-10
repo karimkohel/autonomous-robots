@@ -498,3 +498,5 @@ ESCAPE_UNKNOWN_EDGE_REWARD = 0.08
 ESCAPE_OPEN_REGION_REWARD = 0.045
 ESCAPE_TARGET_DISTANCE_WEIGHT = 0.35
 ESCAPE_DISTANCE_PREFERENCE_WEIGHT = 0.18
+
+# this set of parameters was written with the help of ChatGPT at our specific request and editorial remarks, then edited manually throughout the project progression

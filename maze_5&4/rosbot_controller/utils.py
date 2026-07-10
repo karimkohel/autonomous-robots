@@ -22,6 +22,7 @@ def normalize_angle(angle):
     while angle < -math.pi:
         angle += 2.0 * math.pi
     return angle
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def bresenham_line(start_col, start_row, end_col, end_row):
@@ -54,10 +55,12 @@ def bresenham_line(start_col, start_row, end_col, end_row):
             current_row += step_row
 
     return cells
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def euclidean_cells(cell_a, cell_b):
     return math.hypot(cell_a[0] - cell_b[0], cell_a[1] - cell_b[1])
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def octile_heuristic(cell_a, cell_b):
@@ -68,6 +71,7 @@ def octile_heuristic(cell_a, cell_b):
     diagonal = min(delta_row, delta_col)
     straight = max(delta_row, delta_col) - diagonal
     return diagonal * SQRT_2 + straight
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def simplify_grid_path(path):
@@ -102,3 +106,4 @@ def simplify_grid_path(path):
     simplified.append(path[-1])
     return simplified
 
+# this function was written with the help of ChatGPT at our specific request and editorial remarks

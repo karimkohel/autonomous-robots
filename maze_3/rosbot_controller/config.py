@@ -305,3 +305,4 @@ FRONTIER_SIZE_REWARD = 0.12
 # A* uses 8-connected movement.
 SQRT_2 = math.sqrt(2.0)
 
+# this set of parameters was written with the help of ChatGPT at our specific request and editorial remarks, then edited manually throughout the project progression
