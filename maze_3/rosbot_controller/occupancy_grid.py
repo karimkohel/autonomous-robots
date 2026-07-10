@@ -4,6 +4,7 @@ This is the map/planning data structure from the provided working controller.
 Only imports were adjusted for modular use; internal logic is unchanged.
 """
 
+import heapq
 import math
 import struct
 from collections import deque
