@@ -1,5 +1,10 @@
 # ROSBOT CONTROLLER
 
+### Contributors
+- Kareem Kohel
+- Mohamed Badawy
+- Mohamed Ithar
+
 ## Structure
 
 Every folder contains a `rosbot_controller` folder, this is the important folder.
@@ -26,7 +31,11 @@ Each maze folder holds the controller that can be used to solve that maze. in th
 │       ├── robot_io.py
 │       ├── rosbot_controller_maze4.py
 │       └── utils.py
-└── README.md
+├── README.md
+└── videos
+    ├── maze3.mp4
+    ├── maze4.mp4
+    └── Maze5.mp4
 ```
 ## Running the code
 
@@ -55,4 +64,5 @@ then click on controller and instead of rosbot, chooose the `rosbot_controller` 
 
 
 just for clarification, we only were able to solve maps 3,4,5. using 1 main code base, and one modified scenario.
+
 
