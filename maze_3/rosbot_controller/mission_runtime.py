@@ -42,6 +42,7 @@ def set_wheel_speeds(left_speed, right_speed):
         motor.setVelocity(left_speed)
     for motor in right_motors:
         motor.setVelocity(right_speed)
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks, then edited manually at our discretion
 
 
 def stop_robot():
@@ -55,6 +56,7 @@ def closest_named_ir(ir_values):
     """Return the name and value of the closest IR sensor."""
     index = min(range(len(ir_values)), key=lambda i: ir_values[i])
     return IR_SENSOR_NAMES[index], ir_values[index]
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def turn_sweep_ir(ir_values, turn_sign):
@@ -70,15 +72,18 @@ def turn_sweep_ir(ir_values, turn_sign):
         candidates = (("fr", ir_values[1]), ("rl", ir_values[2]))
 
     return min(candidates, key=lambda item: item[1])
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def read_encoders():
     return [encoder.getValue() for encoder in encoders]
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def get_compass_heading():
     north = compass.getValues()
     return math.atan2(north[0], north[1])
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def point_cloud_clearances(point_cloud):
@@ -104,10 +109,12 @@ def point_cloud_clearances(point_cloud):
             right = min(right, distance)
 
     return front, left, right
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def format_distance(value):
     return "inf" if not math.isfinite(value) else f"{value:.2f}"
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def analyse_and_map_green_floor():
@@ -248,6 +255,7 @@ def analyse_and_map_green_floor():
             forward += MAP_RESOLUTION
 
     return ratio, newly_added, valid_depth_points
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 
@@ -487,6 +495,7 @@ def analyse_and_map_low_clearance():
         )
 
     return newly_added, valid_points, nearest_depth
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def target_colour_match(red, green, blue, colour_name):
@@ -511,6 +520,7 @@ def target_colour_match(red, green, blue, colour_name):
         )
 
     return False
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks then edited manually
 
 
 def nearest_valid_depth(depth_image, width, height, x, y, minimum, maximum):
@@ -539,6 +549,7 @@ def nearest_valid_depth(depth_image, width, height, x, y, minimum, maximum):
             return median(candidates)
 
     return None
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def target_detection_ratio_threshold(colour_name):
@@ -547,6 +558,7 @@ def target_detection_ratio_threshold(colour_name):
     if colour_name == "yellow":
         return YELLOW_DETECTION_MIN_RATIO
     return 1.0
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def target_reached_ratio_threshold(colour_name):
@@ -555,6 +567,7 @@ def target_reached_ratio_threshold(colour_name):
     if colour_name == "yellow":
         return YELLOW_REACHED_COLOR_RATIO
     return 1.0
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def store_target_ratio_diagnostic(
@@ -596,6 +609,7 @@ def store_target_ratio_diagnostic(
         "accepted": accepted,
         "failure_reason": failure_reason,
     }
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def detect_coloured_pillar(colour_name):
@@ -846,7 +860,7 @@ def detect_coloured_pillar(colour_name):
         "bbox_height": bounding_height,
         "bbox_height_ratio": bbox_height_ratio,
     }
-
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def target_visually_reached(detection, colour_name):
     """
@@ -862,7 +876,7 @@ def target_visually_reached(detection, colour_name):
         and detection["bbox_height_ratio"]
         >= TARGET_REACHED_MIN_BBOX_HEIGHT_RATIO
     )
-
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def format_target_ratio_console_line(colour_name):
     """
@@ -908,7 +922,7 @@ def format_target_ratio_console_line(colour_name):
         f"accepted={'YES' if diagnostic['accepted'] else 'NO'} | "
         f"reason={diagnostic['failure_reason']}"
     )
-
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 # ============================================================
 # Runtime state
@@ -932,6 +946,7 @@ def planning_output_path_for(plan_number):
         controller_directory,
         "maze3_mission_plan_latest.bmp",
     )
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 controller_start_time = robot.getTime()
 last_scan_time = -1.0
@@ -1134,6 +1149,7 @@ blue_reached_simulation_time = None
 yellow_reached_simulation_time = None
 
 finished = False
+# this set of variables were written with the help of ChatGPT and edited manually throughout the project
 
 
 # ============================================================
@@ -1152,6 +1168,7 @@ def initialize_pose():
     robot_x = 0.0
     robot_y = 0.0
     robot_theta = 0.0
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def update_pose():
@@ -1187,6 +1204,8 @@ def update_pose():
     if math.hypot(robot_x - last_path_x, robot_y - last_path_y) >= 0.02:
         path_points.append((robot_x, robot_y))
 
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
+
 
 # ============================================================
 # Phase transitions
@@ -1221,6 +1240,7 @@ def enter_phase(new_phase, current_time):
             f"left clearance={format_distance(last_left_lidar)} m | "
             f"right clearance={format_distance(last_right_lidar)} m"
         )
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def segment_distance():
@@ -1228,7 +1248,7 @@ def segment_distance():
         robot_x - segment_start_x,
         robot_y - segment_start_y,
     )
-
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 # ============================================================
 # Planning and path-following stages
@@ -1326,7 +1346,7 @@ def build_current_planning_layers(current_time=None):
         clearance_inflated_cells,
         inflated_cells,
     )
-
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def required_target_colour():
@@ -1335,6 +1355,7 @@ def required_target_colour():
     if mission_state in ("SEARCH_YELLOW", "NAVIGATE_YELLOW"):
         return "yellow"
     return None
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def current_target_position():
@@ -1345,6 +1366,7 @@ def current_target_position():
     if colour == "yellow":
         return yellow_target_position
     return None
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def set_current_target_position(position):
@@ -1359,7 +1381,7 @@ def set_current_target_position(position):
         blue_target_position = position
     elif colour == "yellow":
         yellow_target_position = position
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def clear_target_tracker():
     global tracked_target_position
@@ -1373,7 +1395,7 @@ def clear_target_tracker():
     target_confirmation_count = 0
     target_reached_confirmation_count = 0
     last_target_seen_time = -1.0
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def update_colour_cache(colour_name, detection, current_time):
     """Update one independent blue/yellow global-position cache."""
@@ -1430,7 +1452,7 @@ def update_colour_cache(colour_name, detection, current_time):
         yellow_target_position = track["position"]
 
     return track["confirmations"] >= TARGET_CONFIRMATIONS_REQUIRED
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def sync_required_target_tracker():
     """Copy the required-colour cache into the generic mission tracker."""
@@ -1451,7 +1473,7 @@ def sync_required_target_tracker():
     tracked_target_depth = track["depth"]
     target_confirmation_count = track["confirmations"]
     last_target_seen_time = track["last_seen"]
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def update_target_tracker(detection, current_time):
     """Backward-compatible wrapper for the currently required target."""
@@ -1468,7 +1490,7 @@ def update_target_tracker(detection, current_time):
     )
     sync_required_target_tracker()
     return confirmed
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def update_all_target_caches(current_time, allow_state_transition=True):
     """
@@ -1639,7 +1661,7 @@ def update_all_target_caches(current_time, allow_state_transition=True):
         return True, True, current_required_detection
 
     return False, True, current_required_detection
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def target_line_of_sight(candidate, target_cell, blocked_cells):
     """Check that the candidate has a mostly clear view toward the pillar."""
@@ -1666,7 +1688,7 @@ def target_line_of_sight(candidate, target_cell, blocked_cells):
             return False
 
     return True
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def choose_target_approach(
     target_position,
@@ -1752,7 +1774,7 @@ def choose_target_approach(
         return None, None, float("inf")
 
     return best[1], best[2], best[3]
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_completed_plan(current_time):
     """Dispatch completion according to the active plan type."""
@@ -1776,7 +1798,7 @@ def handle_completed_plan(current_time):
         return
 
     handle_frontier_reached(current_time)
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def target_retry_allowed(colour_name, current_time):
@@ -1799,14 +1821,14 @@ def target_retry_allowed(colour_name, current_time):
     )
 
     return moved >= TARGET_FAILED_RETRY_MOVE
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def postpone_target_retry(colour_name, current_time):
     target_retry_not_before[colour_name] = (
         current_time + TARGET_FAILED_RETRY_DELAY
     )
     target_retry_pose[colour_name] = (robot_x, robot_y)
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def plan_to_current_target(reason, current_time):
     """Plan an A* route to a safe point near the required pillar."""
@@ -1965,7 +1987,7 @@ def plan_to_current_target(reason, current_time):
         f"Starting navigation to {target_colour} | "
         f"first waypoint=({first_x:.2f}, {first_y:.2f})"
     )
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def plan_for_current_mission(reason, current_time):
     """Choose target navigation or frontier exploration."""
@@ -1995,7 +2017,7 @@ def plan_for_current_mission(reason, current_time):
             plan_and_start_following(reason, current_time)
     else:
         plan_and_start_following(reason, current_time)
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def remaining_path_cells():
     """Rasterize the current robot-to-waypoint corridor in map cells."""
@@ -2038,7 +2060,7 @@ def remaining_path_cells():
         current_cell = waypoint_cell
 
     return cells
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def remaining_path_intersects(blocked_cells):
     corridor = remaining_path_cells()
@@ -2056,6 +2078,7 @@ def remaining_path_intersects(blocked_cells):
         intersection,
         key=lambda cell: euclidean_cells(robot_cell, cell),
     )
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def print_planning_summary(
     reason,
@@ -2122,7 +2145,7 @@ def print_planning_summary(
         print(f"Frontier score         : {planned_selection_score:.2f}")
 
     print("========================================\n")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks and edited manually later
 
 def plan_and_start_following(reason, current_time):
     """
@@ -2267,7 +2290,7 @@ def plan_and_start_following(reason, current_time):
         f"{MAX_FRONTIERS_TO_VISIT} | "
         f"first waypoint=({first_x:.2f}, {first_y:.2f}) m"
     )
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 
@@ -2286,7 +2309,7 @@ def set_mission_state(new_state):
 
     sync_required_target_tracker()
     print(f"MISSION STATE -> {mission_state}")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_target_reached(current_time):
     """Record timing and advance from blue to yellow, or finish."""
@@ -2375,6 +2398,7 @@ def handle_target_reached(current_time):
 
         set_mission_state("FINISHED")
         finish_run("blue pillar reached first, then yellow pillar reached")
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def enter_green_observation(reason, current_time):
     """
@@ -2409,7 +2433,7 @@ def enter_green_observation(reason, current_time):
         f"{GREEN_OBSERVE_DURATION:.2f} s"
     )
     print("----------------------------------------\n")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def mark_contact_region(front_ir, current_time):
     """
@@ -2456,7 +2480,7 @@ def mark_contact_region(front_ir, current_time):
         )
 
     return newly_added
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 
@@ -2520,6 +2544,7 @@ def mark_contact_region_from_sensors(ir_values, current_time):
         newly_added += mark_contact_region(front_ir, current_time)
 
     return newly_added
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 def enter_collision_recovery(reason, current_time, ir_values):
@@ -2611,7 +2636,7 @@ def enter_collision_recovery(reason, current_time, ir_values):
         f"{math.degrees(RECOVERY_TURN_ANGLE):.0f} degrees, replan"
     )
     print("========================================\n")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_collision_recovery(current_time, ir_values):
     """Execute the current physical recovery phase."""
@@ -2729,7 +2754,7 @@ def handle_collision_recovery(current_time, ir_values):
             -turn_sign * RECOVERY_TURN_SPEED,
             turn_sign * RECOVERY_TURN_SPEED,
         )
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 
@@ -2778,7 +2803,7 @@ def begin_safe_explore(reason, current_time):
     )
     print(f"Initial turn: {direction_name}")
     print("========================================\n")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_safe_explore(current_time, front_ir, ir_values, green_check_updated):
     """
@@ -2858,7 +2883,7 @@ def handle_safe_explore(current_time, front_ir, ir_values, green_check_updated):
             SAFE_EXPLORE_SPEED + curve,
             SAFE_EXPLORE_SPEED - curve,
         )
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def begin_no_frontier_scan(reason, current_time):
     """Rotate in place once to refresh the map before declaring failure."""
@@ -2884,7 +2909,7 @@ def begin_no_frontier_scan(reason, current_time):
     print("Temporary recovery cells are already clear.")
     print("The robot will rotate almost 360 degrees and rebuild the map.")
     print("========================================\n")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_no_reachable_frontier(reason, current_time):
     """
@@ -2933,7 +2958,7 @@ def handle_no_reachable_frontier(reason, current_time):
         + " | no route after temporary-cell clearing, scans, "
         + "and safe-exploration attempts"
     )
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_no_frontier_scan(current_time):
     """Execute the near-360-degree map-refresh rotation."""
@@ -2972,6 +2997,8 @@ def handle_no_frontier_scan(current_time):
         -NO_FRONTIER_SCAN_SPEED,
         NO_FRONTIER_SCAN_SPEED,
     )
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
+
 
 def request_replan(reason, current_time):
     """Stop, keep mapping, and request a fresh frontier plan."""
@@ -3004,7 +3031,7 @@ def request_replan(reason, current_time):
     print(f"Mission state: {mission_state}")
     print(f"Exploration frontiers reached: {frontiers_reached}")
     print("----------------------------------------\n")
-
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def handle_frontier_reached(current_time):
     """Count the reached frontier and either replan or finish."""
@@ -3030,6 +3057,7 @@ def handle_frontier_reached(current_time):
         f"{required_target_colour()}",
         current_time,
     )
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 def finish_run(reason):
     """Stop once, save the mission map, and write timing results."""
@@ -3170,6 +3198,8 @@ def finish_run(reason):
     print("Timing results:")
     print(results_path)
     print("========================================\n")
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
+
 
 def follow_planned_path(
     current_time,
@@ -3352,6 +3382,7 @@ def follow_planned_path(
         base_speed - correction,
         base_speed + correction,
     )
+# this function was written with the help of ChatGPT at our specific request and editorial remarks
 
 
 # ============================================================
@@ -4078,3 +4109,4 @@ while robot.step(time_step) != -1:
             f"target depth="
             f"{format_distance(tracked_target_depth)}"
         )
+# this main loop was written with the help of ChatGPT at our specific request and editorial remarks, then edited later as the project progressed

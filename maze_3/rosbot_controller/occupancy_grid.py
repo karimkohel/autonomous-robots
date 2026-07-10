@@ -45,9 +45,11 @@ class OccupancyGrid:
         # Temporary collision-recovery cells use an expiry time instead of
         # becoming permanent low-clearance walls.
         self.temporary_recovery_expiry = {}
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def is_inside(self, row, col):
         return 0 <= row < self.size and 0 <= col < self.size
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def metric_to_grid(self, x_forward, y_left):
         """
@@ -64,6 +66,7 @@ class OccupancyGrid:
             return None
 
         return row, col
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def grid_to_metric(self, row, col):
         """Return the map-frame centre of a grid cell in metres."""
@@ -71,6 +74,7 @@ class OccupancyGrid:
         x_forward = (self.center_row - row) * self.resolution
         y_left = (self.center_col - col) * self.resolution
         return x_forward, y_left
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def update_cell(self, row, col, amount):
         if not self.is_inside(row, col):
@@ -81,6 +85,7 @@ class OccupancyGrid:
             MIN_EVIDENCE,
             MAX_EVIDENCE,
         )
+        # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def add_ray(self, origin_x, origin_y, end_x, end_y, endpoint_is_hit):
         origin_cell = self.metric_to_grid(origin_x, origin_y)
@@ -107,6 +112,7 @@ class OccupancyGrid:
 
         if endpoint_is_hit:
             self.update_cell(end_row, end_col, OCCUPIED_UPDATE)
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def update_from_point_cloud(self, point_cloud, robot_x, robot_y, theta):
         cos_theta = math.cos(theta)
@@ -166,6 +172,7 @@ class OccupancyGrid:
             valid_points += 1
 
         return valid_points
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def add_forbidden_metric(self, x_forward, y_left, radius_cells=1):
         """Mark a small disk around a metric point as green forbidden."""
@@ -195,6 +202,7 @@ class OccupancyGrid:
                     newly_added += 1
 
         return newly_added
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def has_lidar_obstacle_near(self, row, col, radius_cells):
         """True when the normal LiDAR map already explains this obstacle."""
@@ -216,6 +224,7 @@ class OccupancyGrid:
                     return True
 
         return False
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def confirm_clearance_observations(self, observed_cells):
         """
@@ -242,6 +251,7 @@ class OccupancyGrid:
                 newly_added += 1
 
         return newly_added
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def add_clearance_metric(self, x_forward, y_left, radius_cells=1):
         """Mark a small disk as blocked by insufficient vertical clearance."""
@@ -271,6 +281,7 @@ class OccupancyGrid:
                     newly_added += 1
 
         return newly_added
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def add_temporary_recovery_metric(
         self,
@@ -313,6 +324,7 @@ class OccupancyGrid:
                 )
 
         return newly_added
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def active_temporary_recovery_cells(self, current_time):
         """Return unexpired recovery cells and remove expired entries."""
@@ -327,6 +339,7 @@ class OccupancyGrid:
             del self.temporary_recovery_expiry[cell]
 
         return set(self.temporary_recovery_expiry)
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def clear_temporary_recovery_cells(self):
         """Remove all temporary collision-recovery exclusions."""
@@ -334,6 +347,7 @@ class OccupancyGrid:
         removed = len(self.temporary_recovery_expiry)
         self.temporary_recovery_expiry.clear()
         return removed
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def inflate_cell_set(self, cells, radius_cells):
         """Return a circular inflation of an arbitrary cell set."""
@@ -356,6 +370,7 @@ class OccupancyGrid:
                     inflated.add((row, col))
 
         return inflated
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def cell_state(self, row, col):
         """Return 'occupied', 'free', or 'unknown'."""
@@ -367,6 +382,7 @@ class OccupancyGrid:
         if score <= FREE_THRESHOLD:
             return "free"
         return "unknown"
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def count_classified_cells(self):
         unknown = 0
@@ -384,6 +400,7 @@ class OccupancyGrid:
                     unknown += 1
 
         return unknown, free, occupied
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     # --------------------------------------------------------
     # Obstacle inflation
@@ -421,6 +438,7 @@ class OccupancyGrid:
                     inflated_cells.add((row, col))
 
         return occupied_cells, inflated_cells
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     # --------------------------------------------------------
     # Frontier detection and clustering
@@ -459,6 +477,7 @@ class OccupancyGrid:
                     frontier_cells.add(cell)
 
         return frontier_cells
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     @staticmethod
     def cluster_frontiers(frontier_cells):
@@ -492,6 +511,7 @@ class OccupancyGrid:
             clusters.append(cluster)
 
         return clusters
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     # --------------------------------------------------------
     # A* planning
@@ -511,6 +531,7 @@ class OccupancyGrid:
 
         # Exploration paths are allowed only through observed free space.
         return self.cell_state(row, col) == "free"
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def astar(self, start, goal, inflated_cells):
         """Return (path, cost), or (None, infinity) when unreachable."""
@@ -591,6 +612,7 @@ class OccupancyGrid:
                 )
 
         return None, float("inf")
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     def choose_frontier_and_path(
         self,
@@ -659,6 +681,7 @@ class OccupancyGrid:
             return None, None, None, float("inf"), float("inf")
 
         return best_result
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
     # --------------------------------------------------------
     # BMP visualization
@@ -851,4 +874,6 @@ class OccupancyGrid:
 
                 row_data.extend(b"\x00" * row_padding)
                 image_file.write(row_data)
+
+    # this function was written with the help of ChatGPT at our specific request and editorial remarks
 
