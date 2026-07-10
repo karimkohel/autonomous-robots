@@ -1,6 +1,0 @@
-Maze 3 mission result
-Reason: no reachable frontier was found | no route after temporary-cell clearing, scans, and safe-exploration attempts
-Mission state: SEARCH_BLUE
-Start simulation -> blue pillar reached: not reached
-Blue pillar reached -> yellow pillar reached: not reached
-Total simulation time: mission incomplete
