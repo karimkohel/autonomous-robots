@@ -9,6 +9,7 @@ Each maze folder holds the controller that can be used to solve that maze. in th
 ```
 .
 ├── ARCHITECTURE_NOTES.md
+├── Atonomous_Robots_document.pdf
 ├── maze_3
 │   └── rosbot_controller
 │       ├── config.py
